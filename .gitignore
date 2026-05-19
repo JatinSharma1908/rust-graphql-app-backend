@@ -1,0 +1,25 @@
+# Rust
+/target
+
+# Environment variables - NEVER commit this
+.env
+.env.local
+.env.production
+
+# SQLx offline cache (optional, commit if you want offline builds)
+.sqlx
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts
+*.pdb
