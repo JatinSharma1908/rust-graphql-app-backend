@@ -40,7 +40,7 @@ async fn graphql_handler(
                     exp: usize,
                 }
 
-                let secret = std::env::var("JWT_SECRET").unwrap_or_default();
+                let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_ | "secret".to_string());
                 if let Ok(data) = decode::<Claims>(
                     token,
                     &DecodingKey::from_secret(secret.as_bytes()),
