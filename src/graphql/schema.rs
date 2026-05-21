@@ -1,14 +1,15 @@
 use async_graphql::*;
 use super::resolvers::user::{UserQuery, UserMutation};
 use super::resolvers::post::{PostQuery, PostMutation};
+use super::resolvers::job::{JobQuery, JobMutation};
 
 // Merge all queries here
 #[derive(MergedObject, Default)]
-pub struct QueryRoot(UserQuery, PostQuery);
+pub struct QueryRoot(UserQuery, PostQuery, JobQuery);
 
 // Merge all mutations here
 #[derive(MergedObject, Default)]
-pub struct MutationRoot(UserMutation, PostMutation);
+pub struct MutationRoot(UserMutation, PostMutation, JobMutation);
 
 pub type AppSchema = Schema<QueryRoot, MutationRoot, EmptySubscription>;
 
