@@ -1,6 +1,9 @@
 use async_graphql::*;
 use chrono::NaiveDateTime;
 use sqlx::PgPool;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 // ---- Types ----
@@ -32,7 +35,7 @@ pub struct Participant {
 }
 
 /// A single message in a conversation
-#[derive(SimpleObject)]
+#[derive(SimpleObject, Clone)]
 pub struct Message {
     pub id: Uuid,
     pub conversation_id: Uuid,
@@ -531,7 +534,7 @@ impl MessageMutation {
 
         tx.commit().await?;
 
-        Ok(Message {
+        let new_message = Message {
             id: msg.id,
             conversation_id: msg.conversation_id,
             sender_id: msg.sender_id,
@@ -543,7 +546,14 @@ impl MessageMutation {
             reply_to_id: msg.reply_to_id,
             is_deleted: msg.is_deleted.unwrap_or(false),
             created_at: msg.created_at,
-        })
+        };
+
+        // Broadcast to all active subscribers — errors only if no subscribers, safe to ignore
+        if let Ok(sender) = ctx.data::<broadcast::Sender<Message>>() {
+            let _ = sender.send(new_message.clone());
+        }
+
+        Ok(new_message)
     }
 
     /// Soft-delete a message. Only the sender can delete their own message.
@@ -601,5 +611,54 @@ impl MessageMutation {
         }
 
         Ok(true)
+    }
+}
+// ---- Subscription ----
+
+#[derive(Default)]
+pub struct MessageSubscription;
+
+#[Subscription]
+impl MessageSubscription {
+    /// Subscribe to new messages in a conversation.
+    /// The connection is authenticated via the same JWT header used for mutations.
+    /// Only participants of the conversation receive events.
+    async fn message_received(
+        &self,
+        ctx: &Context<'_>,
+        conversation_id: Uuid,
+    ) -> Result<impl tokio_stream::Stream<Item = Message>> {
+        let pool = ctx.data::<PgPool>()?;
+        let user_id = ctx.data::<Uuid>()?;
+
+        // Guard: user must be a participant of the conversation
+        let is_participant = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM conversation_participants
+                WHERE conversation_id = $1 AND user_id = $2
+            )
+            "#,
+            conversation_id,
+            user_id
+        )
+        .fetch_one(pool)
+        .await?
+        .unwrap_or(false);
+
+        if !is_participant {
+            return Err(Error::new("You are not part of this conversation"));
+        }
+
+        let sender = ctx.data::<broadcast::Sender<Message>>()?;
+        let receiver = sender.subscribe();
+
+        // Wrap the broadcast receiver in a stream, drop receive errors (lagged),
+        // and filter to only messages belonging to this conversation.
+        let stream = BroadcastStream::new(receiver)
+            .filter_map(|result: Result<Message, _>| result.ok())
+            .filter(move |msg| msg.conversation_id == conversation_id);
+
+        Ok(stream)
     }
 }
